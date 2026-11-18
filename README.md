@@ -59,18 +59,34 @@ Your instructor will give you a new requirement. Implement it in your refactored
 
 | Measure | Before | After |
 |---|---|---|
-| Tests passing | | |
-| Lines in the largest file | | |
-| Places where the fine rate appears | | |
-| Route handlers containing SQL | | |
-| Places edited for the change request | n/a | |
-| Can the fine rule be tested without HTTP or a database? | | |
+| Tests passing | 7 of 53 | 53 of 53 |
+| Lines in the largest application file | 316 | 146 |
+| Places where the fine rate appears | 7 | 1 |
+| Route handlers containing SQL | 21 | 0 |
+| Places edited for the change request | n/a | Pending instructor requirement |
+| Can the fine rule be tested without HTTP or a database? | No | Yes |
+
+The baseline is the partially refactored project as checked in before this work. The SQL count includes the unregistered handlers in the three router files.
+
+### Diagnosis
+
+| Where | Main issue | Change made harder |
+|---|---|---|
+| Route registration | Coupling | The extracted routers depended on an undefined `app`, so moving handlers disabled their endpoints. |
+| Book, member, loan and report handlers | Cohesion | HTTP handling, SQL and business rules shared functions, so changing storage meant editing HTTP handlers. |
+| Loan, member and report calculations | Cohesion | The daily fine rate appeared in seven calculations, so a rate change could leave reports and checkout eligibility disagreeing. |
+| Loan notifications | Coupling | The sender read a mutable global member, so concurrent requests could use the wrong recipient. |
+| Resource updates in `app.py` | Coupling | Update handlers called other route functions, so a change to a read or renew handler could change update behavior. |
 
 ## Questions to answer
 
 1. Which module is the most cohesive? Describe its one job in a sentence.
 2. Which dependency did you remove, and what can now change independently because of that?
 3. What coupling remains, and why did you accept it?
+
+1. `fines.py` handles late-day and fine calculations.
+2. Routers no longer depend on SQL or SQLite connections, so database queries can change independently of Flask request handling.
+3. Services share named row fields with repositories and pass one connection across related writes. This lets checkout and return update the loan and book availability in a single transaction.
 
 ## API reference
 

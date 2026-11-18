@@ -1,98 +1,44 @@
-import re
-import sqlite3
-from datetime import date
 from flask import Blueprint, jsonify, request
+
+from routers.serializers import member_loan_json
+from services import membersService as members
+
 members_bp = Blueprint("members", __name__)
 
 
-def check(value, kind):
-    if kind == "email":
-        return re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", str(value)) is not None
-    if kind == "member_type":
-        return value in ("student", "staff")
-    return False
+def member_json(member):
+    return {key: member[key] for key in ("id", "name", "email", "type")}
 
 
-def money(x):
-    return round(float(x), 2)
-
-@app.route("/members", methods=["GET"])
+@members_bp.get("/members")
 def list_members():
-    conn = sqlite3.connect("library.db")
-    rows = conn.execute("SELECT * FROM members").fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        result.append({"id": r[0], "name": r[1], "email": r[2], "type": r[3]})
-    return jsonify(result)
+    return jsonify([member_json(member) for member in members.list_members()])
 
-@app.route("/members/<int:member_id>", methods=["GET"])
+
+@members_bp.get("/members/<int:member_id>")
 def get_member(member_id):
-    conn = sqlite3.connect("library.db")
-    r = conn.execute("SELECT * FROM members WHERE id = ?", (member_id,)).fetchone()
-    conn.close()
-    if r is None:
-        return jsonify({"error": "member not found"}), 404
-    return jsonify({"id": r[0], "name": r[1], "email": r[2], "type": r[3]})
+    return jsonify(member_json(members.get_member(member_id)))
 
-@app.route("/members", methods=["POST"])
+
+@members_bp.post("/members")
 def create_member():
-    data = request.get_json(silent=True) or {}
-    if not data.get("name"):
-        return jsonify({"error": "name is required"}), 400
-    if not check(data.get("email"), "email"):
-        return jsonify({"error": "invalid email"}), 400
-    member_type = data.get("type", "student")
-    if not check(member_type, "member_type"):
-        return jsonify({"error": "type must be student or staff"}), 400
-    conn = sqlite3.connect("library.db")
-    existing = conn.execute("SELECT * FROM members WHERE email = ?", (data["email"],)).fetchone()
-    if existing is not None:
-        conn.close()
-        return jsonify({"error": "email already registered"}), 409
-    cur = conn.execute(
-        "INSERT INTO members (name, email, type) VALUES (?, ?, ?)",
-        (data["name"], data["email"], member_type),
-    )
-    conn.commit()
-    r = conn.execute("SELECT * FROM members WHERE id = ?", (cur.lastrowid,)).fetchone()
-    conn.close()
-    return jsonify({"id": r[0], "name": r[1], "email": r[2], "type": r[3]}), 201
+    return jsonify(member_json(members.create_member(request.get_json(silent=True)))), 201
 
-@app.route("/members/<int:member_id>/loans", methods=["GET"])
+
+@members_bp.route("/members/<int:member_id>", methods=["PUT", "PATCH"])
+def update_member(member_id):
+    updated = members.update_member(member_id, request.get_json(silent=True), request.method == "PUT")
+    return jsonify(member_json(updated))
+
+
+@members_bp.delete("/members/<int:member_id>")
+def delete_member(member_id):
+    members.delete_member(member_id)
+    return "", 204
+
+
+@members_bp.get("/members/<int:member_id>/loans")
 def member_loans(member_id):
-    conn = sqlite3.connect("library.db")
-    m = conn.execute("SELECT * FROM members WHERE id = ?", (member_id,)).fetchone()
-    if m is None:
-        conn.close()
-        return jsonify({"error": "member not found"}), 404
-    rows = conn.execute("SELECT * FROM loans WHERE member_id = ?", (member_id,)).fetchall()
-    conn.close()
-    owed = 0
-    open_loans = 0
-    loans = []
-    for loan in rows:
-        if loan[4] == 0:
-            open_loans += 1
-            days_late = (date.today() - date.fromisoformat(loan[3])).days
-            if days_late > 0:
-                owed += days_late * 0.5
-        elif loan[6] == 0:
-            owed += loan[5]
-        loans.append(
-            {
-                "id": loan[0],
-                "book_id": loan[1],
-                "due_date": loan[3],
-                "returned": bool(loan[4]),
-                "fine": money(loan[5]),
-                "fine_paid": bool(loan[6]),
-            }
-        )
-    if m[3] == "staff":
-        remaining = 5 - open_loans
-    else:
-        remaining = 3 - open_loans
-    return jsonify({"loans": loans, "total_owed": money(owed), "loans_remaining": remaining})
-
-
+    account = members.member_account(member_id)
+    account["loans"] = [member_loan_json(loan) for loan in account["loans"]]
+    return jsonify(account)

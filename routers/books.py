@@ -1,57 +1,43 @@
-import sqlite3
 from flask import Blueprint, jsonify, request
 
+from services import booksService as books
+
 books_bp = Blueprint("books", __name__)
-@app.route("/books", methods=["GET"])
+
+
+def book_json(book):
+    return {
+        "id": book["id"],
+        "title": book["title"],
+        "author": book["author"],
+        "isbn": book["isbn"],
+        "available": bool(book["available"]),
+    }
+
+
+@books_bp.get("/books")
 def list_books():
-    conn = sqlite3.connect("library.db")
-    if request.args.get("available") == "true":
-        rows = conn.execute("SELECT * FROM books WHERE available = 1").fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM books").fetchall()
-    conn.close()
-    result = []
-    for r in rows:
-        result.append({"id": r[0], "title": r[1], "author": r[2], "isbn": r[3], "available": bool(r[4])})
-    return jsonify(result)
+    rows = books.list_books(request.args.get("available") == "true")
+    return jsonify([book_json(book) for book in rows])
 
-@app.route("/books/<int:book_id>", methods=["GET"])
+
+@books_bp.get("/books/<int:book_id>")
 def get_book(book_id):
-    conn = sqlite3.connect("library.db")
-    r = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
-    conn.close()
-    if r is None:
-        return jsonify({"error": "book not found"}), 404
-    return jsonify({"id": r[0], "title": r[1], "author": r[2], "isbn": r[3], "available": bool(r[4])})
+    return jsonify(book_json(books.get_book(book_id)))
 
-@app.route("/books", methods=["POST"])
+
+@books_bp.post("/books")
 def create_book():
-    data = request.get_json(silent=True) or {}
-    if not data.get("title") or not data.get("author"):
-        return jsonify({"error": "title and author are required"}), 400
-    if not check(data.get("isbn"), "isbn"):
-        return jsonify({"error": "invalid isbn"}), 400
-    conn = sqlite3.connect("library.db")
-    cur = conn.execute(
-        "INSERT INTO books (title, author, isbn, available) VALUES (?, ?, ?, 1)",
-        (data["title"], data["author"], data["isbn"]),
-    )
-    conn.commit()
-    r = conn.execute("SELECT * FROM books WHERE id = ?", (cur.lastrowid,)).fetchone()
-    conn.close()
-    return jsonify({"id": r[0], "title": r[1], "author": r[2], "isbn": r[3], "available": bool(r[4])}), 201
+    return jsonify(book_json(books.create_book(request.get_json(silent=True)))), 201
 
-@app.route("/books/<int:book_id>", methods=["DELETE"])
+
+@books_bp.route("/books/<int:book_id>", methods=["PUT", "PATCH"])
+def update_book(book_id):
+    updated = books.update_book(book_id, request.get_json(silent=True), request.method == "PUT")
+    return jsonify(book_json(updated))
+
+
+@books_bp.delete("/books/<int:book_id>")
 def delete_book(book_id):
-    conn = sqlite3.connect("library.db")
-    r = conn.execute("SELECT * FROM books WHERE id = ?", (book_id,)).fetchone()
-    if r is None:
-        conn.close()
-        return jsonify({"error": "book not found"}), 404
-    if r[4] == 0:
-        conn.close()
-        return jsonify({"error": "book is on loan"}), 409
-    conn.execute("DELETE FROM books WHERE id = ?", (book_id,))
-    conn.commit()
-    conn.close()
+    books.delete_book(book_id)
     return "", 204
